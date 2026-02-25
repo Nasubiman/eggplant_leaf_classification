@@ -1,8 +1,10 @@
-import torch
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # GPU 0 のみ使用 (RTX 2080 Ti)
+
+import torch
 from datasets import load_from_disk
 from transformers import (
-    AutoProcessor, PaliGemmaForConditionalGeneration, 
+    AutoProcessor, PaliGemmaForConditionalGeneration,
     BitsAndBytesConfig, TrainingArguments, Trainer
 )
 from peft import get_peft_model, LoraConfig
@@ -10,76 +12,94 @@ from peft import get_peft_model, LoraConfig
 def main():
     model_id = "google/paligemma2-3b-pt-224"
     output_dir = "./paligemma-eggplant-lora"
-    
+
     # 1. データセットの読み込み (trainとvalを使う)
     dataset_dict = load_from_disk("./eggplant_dataset")
     train_ds = dataset_dict["train"]
     val_ds = dataset_dict["val"]
-    
+
     print(f"Training on {len(train_ds)} samples, Validating on {len(val_ds)} samples.")
 
     # 2. プロセッサの読み込み
     processor = AutoProcessor.from_pretrained(model_id)
 
-    # 3. 4bit量子化設定 (VRAM 12GB環境用)
+    # 3. 4bit量子化 + モデルの読み込み
+    #    RTX 2080 Ti は Turing アーキテクチャなので bf16 非対応 → compute_dtype を float16 にする
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
+        bnb_4bit_compute_dtype=torch.float16  # RTX 2080 Ti 用
     )
 
-    # モデルの読み込み
     model = PaliGemmaForConditionalGeneration.from_pretrained(
         model_id,
         quantization_config=bnb_config,
-        device_map="auto" # 自動的にGPUへ割り当て
+        device_map={"": 0},  # 単一GPU明示指定 (Acceleratorとの衝突回避)
     )
-    
-    # Vision Encoderなど不必要なパラメータの学習を防ぎ、LoRAを言語モデル部分のアテンション等に適用
+
+    # 4. Vision Encoder を完全に凍結する
+    for param in model.vision_tower.parameters():
+        param.requires_grad = False
+    for param in model.multi_modal_projector.parameters():
+        param.requires_grad = False
+
+    # 5. LoRA を言語モデル部分にのみ適用する
+    #    modules_to_save は不要。target_modules で言語モデル内のLinear層だけを指定。
     lora_config = LoraConfig(
         r=8,
         lora_alpha=16,
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        modules_to_save=None,
         task_type="CAUSAL_LM",
-        bias="none"
+        bias="none",
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # 4. データコレーター (バッチ作成処理)の定義
+    # 6. gradient checkpointing を安全に有効化
+    #    enable_input_require_grads() を呼ぶことで、vision encoder 出力から
+    #    言語モデルへの受け渡し時に requires_grad=True が付与され、
+    #    gradient checkpointing が正常に動作するようになる
+    model.enable_input_require_grads()
+    model.gradient_checkpointing_enable()
+
+    # 7. データコレーター (バッチ作成処理)の定義
     def collate_fn(examples):
-        texts = [ex["prompt"] for ex in examples]
+        # PaliGemma の推奨に従い、プロンプトの先頭に <image> トークンを付与する
+        texts = ["<image>" + ex["prompt"] for ex in examples]
         labels = [ex["label"] for ex in examples]
         images = [ex["image"].convert("RGB") for ex in examples]
-        
-        # suffixに正解ラベル（生成させたい文字列）のみを渡すことで、Trainerが勝手にinput・target・loss計算用のマスク(-100)をしてくれます
+
+        # suffix に正解ラベルを渡すと、自動で labels のマスク (-100) 処理が行われる
         batch = processor(
             text=texts,
             images=images,
             suffix=labels,
             return_tensors="pt",
-            padding="longest"
+            padding="longest",
         )
         return batch
 
-    # 5. TrainingArgumentsの設定 (12GB VRAMに合わせて極力細かく制御)
-    # 実際にOOM (Out Of Memory) が出る場合は、batch_sizeを下げ、accumulationを上げてください。
+    # 8. TrainingArguments の設定
+    #    RTX 2080 Ti (11GB VRAM) に合わせた省メモリ設定
     args = TrainingArguments(
         output_dir=output_dir,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
-        per_device_eval_batch_size=2,
-        eval_strategy="epoch",  # 各エポック終わりにValidationを実行
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=8,   # 実質バッチサイズ 1x8=8
+        per_device_eval_batch_size=1,
+        eval_strategy="epoch",
         save_strategy="epoch",
         logging_steps=10,
         learning_rate=2e-4,
-        num_train_epochs=3, # まずは3エポック
-        bf16=True,  # RTX 30/40シリーズ等での高速・安定化
-        optim="paged_adamw_8bit", # Optimizerも8bit化してメモリ節約
-        remove_unused_columns=False, # image等の独自カラムが消されないように必須
-        dataloader_pin_memory=False, 
-        report_to="none" # wandb等を使わない場合はnone
+        num_train_epochs=3,
+        fp16=True,                       # RTX 2080 Ti は fp16 を使う (bf16 非対応)
+        optim="paged_adamw_8bit",        # Optimizer のステートを 8bit にして VRAM 節約
+        gradient_checkpointing=True,     # 中間アクティベーションを再計算してメモリ削減
+        gradient_checkpointing_kwargs={"use_reentrant": False},  # 警告抑制 & 安全なモード
+        remove_unused_columns=False,     # image 等の独自カラムを消さない
+        dataloader_pin_memory=False,
+        report_to="none",
     )
 
     trainer = Trainer(
@@ -87,14 +107,14 @@ def main():
         args=args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=collate_fn
+        data_collator=collate_fn,
     )
 
-    # 6. 学習実行
+    # 9. 学習実行
     print("=== Start Training ===")
     trainer.train()
-    
-    # 7. 最終モデルの保存
+
+    # 10. 最終モデルの保存
     final_save_path = f"{output_dir}-final"
     trainer.save_model(final_save_path)
     processor.save_pretrained(final_save_path)
