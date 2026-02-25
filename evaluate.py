@@ -4,9 +4,14 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
 import json
 import time
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")  # GUI不要のバックエンド
+import matplotlib.pyplot as plt
 from datasets import load_from_disk
 from transformers import AutoProcessor, PaliGemmaForConditionalGeneration, LogitsProcessor
 from peft import PeftModel
+from sklearn.metrics import confusion_matrix, classification_report
 from tqdm import tqdm
 
 
@@ -81,6 +86,8 @@ def main():
     # 4. 推論の実行 (1件ずつ)
     correct = 0
     total = len(test_ds)
+    all_preds = []
+    all_trues = []
     print(f"\n=== テストデータ {total}件で推論開始 ===")
 
     start_time = time.time()
@@ -109,6 +116,8 @@ def main():
         ).strip()
 
         # 評価
+        all_preds.append(generated_text)
+        all_trues.append(true_label)
         if generated_text == true_label:
             correct += 1
 
@@ -124,6 +133,46 @@ def main():
     print(f"\n=== 最終結果 ===")
     print(f"Accuracy: {acc:.2f}% ({correct}/{total})")
     print(f"Time: {time.time() - start_time:.2f} seconds")
+
+    # 6. 混同行列（Confusion Matrix）の表示と保存
+    class_labels = [str(i) for i in range(num_classes)]
+    class_names_list = [id_to_class[str(i)] for i in range(num_classes)]
+
+    cm = confusion_matrix(all_trues, all_preds, labels=class_labels)
+
+    print("\n=== 混同行列 ===")
+    print(cm)
+
+    # Classification Report (精度・再現率・F1)
+    print("\n=== Classification Report ===")
+    report = classification_report(all_trues, all_preds, labels=class_labels, target_names=class_names_list)
+    print(report)
+
+    # 混同行列を画像として保存
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+    ax.figure.colorbar(im, ax=ax)
+    ax.set(
+        xticks=np.arange(num_classes),
+        yticks=np.arange(num_classes),
+        xticklabels=class_names_list,
+        yticklabels=class_names_list,
+        ylabel="True Label",
+        xlabel="Predicted Label",
+        title=f"Confusion Matrix (Accuracy: {acc:.2f}%)",
+    )
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    # 各セルに数値を表示
+    for i in range(num_classes):
+        for j in range(num_classes):
+            ax.text(j, i, format(cm[i, j], "d"),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > cm.max() / 2 else "black")
+    fig.tight_layout()
+    save_fig_path = "confusion_matrix.png"
+    plt.savefig(save_fig_path, dpi=150)
+    print(f"\n混同行列を {save_fig_path} に保存しました。")
 
 
 if __name__ == "__main__":
