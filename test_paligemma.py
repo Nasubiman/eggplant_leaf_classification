@@ -33,7 +33,7 @@ print(f"Model loaded successfully in {time.time() - start_time:.2f} seconds on {
 # 3. 画像の読み込みとプロンプトの作成
 print("2. Preparing image and prompt...")
 # pre-trainedモデル（ファインチューニング前）なので、一般的なプロンプトでどのような出力が出るか確認
-prompt = "question: what is the health status of this eggplant leaf in the image?"
+prompt = "disease type"
 image = Image.open(image_path).convert("RGB")
 
 print(f"Image Path: {image_path}")
