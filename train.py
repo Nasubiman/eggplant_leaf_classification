@@ -14,7 +14,7 @@ def main():
     output_dir = "./paligemma-eggplant-lora"
 
     # 1. データセットの読み込み (trainとvalを使う)
-    dataset_dict = load_from_disk("./eggplant_dataset")
+    dataset_dict = load_from_disk("./eggplant_dataset_aug")
     train_ds = dataset_dict["train"]
     val_ds = dataset_dict["val"]
 
@@ -86,19 +86,20 @@ def main():
     args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=8,   # 実質バッチサイズ 1x8=8
+        gradient_accumulation_steps=16,   # 実質バッチサイズ 1x8=8
         per_device_eval_batch_size=1,
         eval_strategy="epoch",
         save_strategy="epoch",
         logging_steps=10,
-        learning_rate=2e-4,
+        learning_rate=1e-4,
         num_train_epochs=3,
         fp16=True,                       # RTX 2080 Ti は fp16 を使う (bf16 非対応)
         optim="paged_adamw_8bit",        # Optimizer のステートを 8bit にして VRAM 節約
         gradient_checkpointing=True,     # 中間アクティベーションを再計算してメモリ削減
-        gradient_checkpointing_kwargs={"use_reentrant": False},  # 警告抑制 & 安全なモード
-        remove_unused_columns=False,     # image 等の独自カラムを消さない
-        dataloader_pin_memory=False,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        remove_unused_columns=False,
+        dataloader_num_workers=4,       # データ読み込みをCPUが並列処理し、GPUの待ち時間を削減
+        dataloader_pin_memory=True,     # GPUへの転送を高速化
         report_to="none",
     )
 
