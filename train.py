@@ -14,7 +14,7 @@ def main():
     output_dir = "./paligemma-eggplant-lora"
 
     # 1. データセットの読み込み (trainとvalを使う)
-    dataset_dict = load_from_disk("./eggplant_dataset_aug")
+    dataset_dict = load_from_disk("./eggplant_dataset")
     train_ds = dataset_dict["train"]
     val_ds = dataset_dict["val"]
 

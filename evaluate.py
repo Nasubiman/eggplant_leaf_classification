@@ -47,7 +47,7 @@ def main():
     lora_path = "./paligemma-eggplant-lora-final"  # 学習後の保存先
 
     # 1. データセットの読み込み (testを使う)
-    dataset_dict = load_from_disk("./eggplant_dataset_aug")
+    dataset_dict = load_from_disk("./eggplant_dataset")
     test_ds = dataset_dict["test"]
 
     with open("class_mapping.json", "r") as f:
