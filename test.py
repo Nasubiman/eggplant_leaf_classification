@@ -26,7 +26,7 @@ class SigLIP2Classifier(nn.Module):
         self.vision_encoder = vision_encoder
         self.classifier = nn.Sequential(
             nn.LayerNorm(hidden_size),
-            nn.Dropout(0.1),
+            nn.Dropout(0.4),
             nn.Linear(hidden_size, num_classes),
         )
 
@@ -71,10 +71,8 @@ def main():
     image_processor = AutoImageProcessor.from_pretrained(model_id)
 
     # 4. モデルの再構築 (学習時と同じアーキテクチャ)
-    full_model = AutoModel.from_pretrained(
-        model_id,
-        torch_dtype=torch.float16,
-    )
+    #    fp32 で読み込み（fp16直読みは NaN の原因）
+    full_model = AutoModel.from_pretrained(model_id)
     if hasattr(full_model, "vision_model"):
         vision_encoder = full_model.vision_model
     else:
@@ -90,8 +88,8 @@ def main():
         target_modules = "all-linear"
 
     lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
+        r=64,
+        lora_alpha=256,
         target_modules=target_modules,
         bias="none",
     )
@@ -172,7 +170,7 @@ def main():
         yticklabels=class_names_list,
         ylabel="True Label",
         xlabel="Predicted Label",
-        title=f"SigLIP2 Confusion Matrix (Accuracy: {acc:.2f}%)",
+        title=f"Confusion Matrix (Accuracy: {acc:.2f}%)",
     )
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
@@ -184,7 +182,8 @@ def main():
                 color="white" if cm[i, j] > cm.max() / 2 else "black",
             )
     fig.tight_layout()
-    save_fig_path = "confusion_matrix_siglip2.png"
+    model_short = model_id.split('/')[-1]
+    save_fig_path = f"confusion_matrix_{model_short}.png"
     plt.savefig(save_fig_path, dpi=150)
     print(f"\n混同行列を {save_fig_path} に保存しました。")
 

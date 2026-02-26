@@ -25,10 +25,14 @@
   | 6 | Wilt Disease（萎凋病） |
 
 ## モデルと学習の方向性
-- **使用モデル:** `google/paligemma2-3b-pt-224` (PaliGemma2 3B パラメータモデル)
-- **タスク設計:** 画像分類（1枚の画像に対して 0〜6 のクラスIDを出力する）
-- **手法:** QLoRA (4bit量子化 + Low-Rank Adaptation) でファインチューニング
-- **推論時の工夫:** Constrained Decoding（0〜6 のトークンのみ出力可能に制限）
+- **使用モデル:** `facebook/dinov3-vitl16-pretrain-lvd1689m` (DINOv3 ViT-Large, 0.3Bパラメータ)
+- **タスク設計:** 画像分類（1枚の画像に対して Softmax で 7 クラスに直接分類）
+- **手法:** LoRA (Low-Rank Adaptation, r=64) + 分類ヘッド（LayerNorm → Dropout → Linear）
+- **学習時の工夫:**
+  - データ拡張（RandomHorizontalFlip, ColorJitter）
+  - Label Smoothing (0.1)
+  - Cosine Annealing LR Scheduler
+  - Vision Encoder と分類ヘッドで学習率を分離
 - **GPU:** NVIDIA RTX 2080 Ti (11GB VRAM) × 2
 
 ## 学習結果
@@ -36,43 +40,47 @@
 ### 学習設定
 | 設定 | 値 |
 |---|---|
-| データ | 元画像のみ (Train: 980枚) |
-| 学習率 | 2e-4 |
-| 実質バッチサイズ | 8 (batch=1 × accum=8) |
-| Epoch数 | 3 |
-| 学習時間 | 約32分 |
+| データ | 元画像 + データ拡張 (Train: 980枚) |
+| 学習率 | Vision Encoder: 3e-5, 分類ヘッド: 1e-4 |
+| バッチサイズ | 8 |
+| Epoch数 | 20 |
+| LoRA | r=64, alpha=256 |
+| 学習時間 | 約5分 |
 
-### Eval Loss 推移
-| Epoch | Eval Loss |
-|---|---|
-| 1 | 0.1676 |
-| 2 | 0.2537 |
-| 3 | **0.1200** ← 最良 |
+### Val Acc 推移（抜粋）
+| Epoch | Train Acc | Val Acc | Val Loss |
+|---|---|---|---|
+| 1 | 0.3878 | 0.7000 | 1.1737 |
+| 5 | 0.9653 | 0.9476 | 0.5986 |
+| 9 | 0.9949 | 0.9619 | 0.5588 |
+| 15 | 1.0000 | **0.9667** | **0.5447** ← 最良 |
+| 20 | 1.0000 | 0.9667 | 0.5458 |
 
 ### テスト結果 (テストデータ 210枚)
-- **Accuracy: 96.19% (202/210)**
+- **Accuracy: 98.10% (206/210)**
+- **推論速度: 11.5 ms/画像 (210枚を2.42秒)**
 
 ### Classification Report
 | クラス | Precision | Recall | F1-Score | Support |
 |---|---|---|---|---|
-| Healthy Leaf | 1.00 | 0.92 | 0.96 | 36 |
-| Insect Pest Disease | 0.93 | 1.00 | 0.96 | 27 |
-| Leaf Spot Disease | 0.94 | 0.97 | 0.95 | 30 |
-| Mosaic Virus Disease | 1.00 | 0.93 | 0.96 | 28 |
-| Small Leaf Disease | 0.97 | 0.97 | 0.97 | 30 |
-| White Mold Disease | 0.93 | 0.96 | 0.95 | 27 |
-| Wilt Disease | 0.97 | 1.00 | 0.98 | 32 |
-| **macro avg** | **0.96** | **0.96** | **0.96** | **210** |
+| Healthy Leaf | 0.97 | 0.97 | 0.97 | 36 |
+| Insect Pest Disease | 1.00 | 1.00 | 1.00 | 27 |
+| Leaf Spot Disease | 0.97 | 0.93 | 0.95 | 30 |
+| Mosaic Virus Disease | 0.93 | 1.00 | 0.97 | 28 |
+| Small Leaf Disease | 1.00 | 1.00 | 1.00 | 30 |
+| White Mold Disease | 1.00 | 0.96 | 0.98 | 27 |
+| Wilt Disease | 1.00 | 1.00 | 1.00 | 32 |
+| **macro avg** | **0.98** | **0.98** | **0.98** | **210** |
 
 ### 混同行列
-`confusion_matrix.png` を参照してください。
+`confusion_matrix_dinov3-vitl16-pretrain-lvd1689m.png` を参照してください。
 
 ## ファイル構成
 | ファイル | 説明 |
 |---|---|
 | `preprocess.py` | データセットをHugging Face datasets形式に変換し、Train/Val/Testに分割する |
-| `train.py` | PaliGemma2-3BをQLoRAでファインチューニングする学習スクリプト |
-| `evaluate.py` | テストデータで推論を実行し、Accuracy・混同行列・Classification Reportを出力するスクリプト |
+| `train.py` | DINOv3をLoRAでファインチューニングする学習スクリプト |
+| `test.py` | テストデータで推論を実行し、Accuracy・混同行列・Classification Reportを出力するスクリプト |
 | `class_mapping.json` | クラス名とIDの対応表 |
 | `config.json` | データセットパス等の環境設定 (.gitignore対象) |
-| `NOTICE` | Gemma Terms of Use に基づくライセンス情報 |
+| `NOTICE` | DINOv3 ライセンス情報 |

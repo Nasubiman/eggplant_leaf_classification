@@ -1,44 +1,37 @@
-NOTICE - Gemma Terms of Use
+NOTICE - Model License Information
 
-This project contains a derivative model based on Google's PaliGemma 2,
-which is part of the Gemma model family.
-
-Gemma is provided under and subject to the Gemma Terms of Use found at
-https://ai.google.dev/gemma/terms
+This project uses derivative models based on Meta's DINOv3,
+a self-supervised Vision Transformer model.
 
 ==========================================================================
 
 1. Base Model
-   - Model: google/paligemma2-3b-pt-224 (PaliGemma 2, 3B parameters)
-   - Provider: Google
-   - License: Gemma Terms of Use
+   - Model: facebook/dinov3-vitl16-pretrain-lvd1689m (DINOv3 ViT-Large)
+   - Provider: Meta AI
+   - License: DINOv3 License (https://ai.meta.com/resources/models-and-libraries/dinov3-license/)
+   - Paper: https://arxiv.org/abs/2508.10104
+   - Repository: https://github.com/facebookresearch/dinov3
 
 2. Modifications
    This project includes the following modifications to the original model:
-   - LoRA (Low-Rank Adaptation) fine-tuning on a custom eggplant disease
-     recognition dataset (Kaggle: sujaykapadnis/eggplant-disease-recognition-dataset)
-   - 4-bit quantization (QLoRA with NF4) for training on consumer GPUs
-   - Constrained Decoding implementation for classification output (0-6)
+   - LoRA (Low-Rank Adaptation, r=64, alpha=256) fine-tuning on a custom
+     eggplant disease recognition dataset
+     (Kaggle: sujaykapadnis/eggplant-disease-recognition-dataset)
+   - Classification head (LayerNorm + Dropout + Linear) added on top of
+     the vision encoder for 7-class disease classification
+   - Training with data augmentation (RandomHorizontalFlip, ColorJitter),
+     Label Smoothing (0.1), and Cosine Annealing LR Scheduler
 
 3. Permitted Uses
-   - Commercial and non-commercial use is permitted
    - Research and academic use is permitted
-   - Fine-tuning and further modification is permitted
-   - Model outputs (predictions, classifications) belong to the user
+   - Please refer to the DINOv3 License for full terms regarding
+     commercial use, redistribution, and other usage conditions
 
 4. Redistribution Requirements
    If you redistribute this derivative model, you must:
-   - Include a copy of or reference to the Gemma Terms of Use
+   - Include a copy of or reference to the DINOv3 License
    - Clearly state that the model has been modified from the original
-   - Ensure recipients comply with the Gemma Terms of Use
    - Include this NOTICE file
 
-5. Prohibited Uses
-   Use of this model is subject to the Gemma Prohibited Use Policy.
-   Prohibited uses include but are not limited to:
-   - Violations of applicable laws
-   - Spam or malware generation
-   - Content that infringes on others' rights
-   - Any malicious or harmful purposes
-
-For the full terms, please visit: https://ai.google.dev/gemma/terms
+For the full license terms, please visit:
+https://ai.meta.com/resources/models-and-libraries/dinov3-license/
