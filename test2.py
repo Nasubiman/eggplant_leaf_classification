@@ -11,39 +11,90 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from datasets import load_from_disk
-from transformers import AutoImageProcessor, AutoModel
-from peft import get_peft_model, LoraConfig
+from torchvision import transforms as T, models
 from sklearn.metrics import confusion_matrix, classification_report
 from tqdm import tqdm
 
 NUM_CLASSES = 7
 
 
-class SigLIP2Classifier(nn.Module):
-    """SigLIP2 の Vision Encoder + Linear 分類ヘッド。"""
-    def __init__(self, vision_encoder, hidden_size, num_classes):
-        super().__init__()
-        self.vision_encoder = vision_encoder
-        self.classifier = nn.Sequential(
-            nn.LayerNorm(hidden_size),
-            nn.Dropout(0.4),
-            nn.Linear(hidden_size, num_classes),
+def build_model(model_name, num_classes, weights=None):
+    """train2.py と同じ構造でモデルを構築する。"""
+    if model_name == "resnet18":
+        model = models.resnet18(weights=weights)
+        model.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(model.fc.in_features, num_classes),
         )
-
-    def forward(self, pixel_values):
-        outputs = self.vision_encoder(pixel_values=pixel_values)
-        if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-            features = outputs.pooler_output
-        else:
-            features = outputs.last_hidden_state.mean(dim=1)
-        logits = self.classifier(features)
-        return logits
+    elif model_name == "resnet50":
+        model = models.resnet50(weights=weights)
+        model.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(model.fc.in_features, num_classes),
+        )
+    elif model_name == "efficientnet_b0":
+        model = models.efficientnet_b0(weights=weights)
+        model.classifier = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.classifier[1].in_features, num_classes),
+        )
+    elif model_name == "efficientnet_b3":
+        model = models.efficientnet_b3(weights=weights)
+        model.classifier = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.classifier[1].in_features, num_classes),
+        )
+    elif model_name == "vit_b_16":
+        model = models.vit_b_16(weights=weights)
+        model.heads = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.heads[0].in_features, num_classes),
+        )
+    elif model_name == "swin_t":
+        model = models.swin_t(weights=weights)
+        model.head = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.head.in_features, num_classes),
+        )
+    elif model_name == "swin_b":
+        model = models.swin_b(weights=weights)
+        model.head = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.head.in_features, num_classes),
+        )
+    elif model_name == "resnext50":
+        model = models.resnext50_32x4d(weights=weights)
+        model.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(model.fc.in_features, num_classes),
+        )
+    elif model_name == "densenet121":
+        model = models.densenet121(weights=weights)
+        model.classifier = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.classifier.in_features, num_classes),
+        )
+    elif model_name == "convnext_tiny":
+        model = models.convnext_tiny(weights=weights)
+        model.classifier[2] = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.classifier[2].in_features, num_classes),
+        )
+    elif model_name == "convnext_base":
+        model = models.convnext_base(weights=weights)
+        model.classifier[2] = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(model.classifier[2].in_features, num_classes),
+        )
+    else:
+        raise ValueError(f"Unknown model: {model_name}")
+    return model
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_dir", type=str, default="./dinov3-vitl16-pretrain-lvd1689m-eggplant",
+        "--model_dir", type=str, default="./resnet50-eggplant",
         help="学習済みモデルのディレクトリ"
     )
     args = parser.parse_args()
@@ -51,15 +102,14 @@ def main():
     model_dir = args.model_dir
     checkpoint_path = os.path.join(model_dir, "best_model.pt")
 
-    # 1. 保存されたチェックポイントの読み込み
+    # 1. チェックポイントの読み込み
     print("Loading checkpoint...")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    model_id = checkpoint["model_id"]
-    hidden_size = checkpoint["hidden_size"]
+    model_name = checkpoint["model_name"]
     num_classes = checkpoint["num_classes"]
-    print(f"Model: {model_id}, Best Epoch: {checkpoint['epoch']}, Val Acc: {checkpoint['val_acc']:.4f}")
+    print(f"Model: {model_name}, Best Epoch: {checkpoint['epoch']}, Val Acc: {checkpoint['val_acc']:.4f}")
 
-    # 2. データセットの読み込み (testを使う)
+    # 2. データセットの読み込み
     dataset_dict = load_from_disk("./eggplant_dataset")
     test_ds = dataset_dict["test"]
 
@@ -67,35 +117,18 @@ def main():
         class_mapping = json.load(f)
     id_to_class = {v: k for k, v in class_mapping.items()}
 
-    # 3. Image Processor の読み込み
-    image_processor = AutoImageProcessor.from_pretrained(model_id)
+    # 3. 画像の前処理（torchvision 標準）
+    normalize = T.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+    test_transform = T.Compose([
+        T.Resize(256),
+        T.CenterCrop(224),
+        T.ToTensor(),
+        normalize,
+    ])
 
-    # 4. モデルの再構築 (学習時と同じアーキテクチャ)
-    #    fp32 で読み込み（fp16直読みは NaN の原因）
-    full_model = AutoModel.from_pretrained(model_id)
-    if hasattr(full_model, "vision_model"):
-        vision_encoder = full_model.vision_model
-    else:
-        vision_encoder = full_model
-
-    # LoRA を同じ設定で適用 (重みはチェックポイントから上書きされる)
-    module_names = {name.split(".")[-1] for name, _ in vision_encoder.named_modules()}
-    if "q_proj" in module_names:
-        target_modules = ["q_proj", "v_proj", "k_proj", "out_proj"]
-    elif "query" in module_names:
-        target_modules = ["query", "key", "value", "dense"]
-    else:
-        target_modules = "all-linear"
-
-    lora_config = LoraConfig(
-        r=64,
-        lora_alpha=256,
-        target_modules=target_modules,
-        bias="none",
-    )
-    vision_encoder = get_peft_model(vision_encoder, lora_config)
-
-    model = SigLIP2Classifier(vision_encoder, hidden_size, num_classes)
+    # 4. モデルの再構築と重みの読み込み
+    model = build_model(model_name, num_classes, weights=None)
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.cuda().eval()
     print("Model loaded successfully.")
@@ -108,15 +141,13 @@ def main():
 
     start_time = time.time()
 
-    # バッチ推論 (PaliGemma と違い、1回のforward passで瞬時に分類できる)
     batch_size = 32
     for i in tqdm(range(0, total, batch_size)):
         batch = test_ds[i : i + batch_size]
         images = [img.convert("RGB") for img in batch["image"]]
         labels = [int(lbl) for lbl in batch["label"]]
 
-        inputs = image_processor(images=images, return_tensors="pt")
-        pixel_values = inputs["pixel_values"].cuda()
+        pixel_values = torch.stack([test_transform(img) for img in images]).cuda()
 
         with torch.no_grad():
             with torch.amp.autocast("cuda"):
@@ -170,7 +201,7 @@ def main():
         yticklabels=class_names_list,
         ylabel="True Label",
         xlabel="Predicted Label",
-        title=f"Confusion Matrix (Accuracy: {acc:.2f}%)",
+        title=f"Confusion Matrix - {model_name} (Accuracy: {acc:.2f}%)",
     )
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
@@ -182,8 +213,7 @@ def main():
                 color="white" if cm[i, j] > cm.max() / 2 else "black",
             )
     fig.tight_layout()
-    model_short = model_id.split('/')[-1]
-    save_fig_path = f"confusion_matrix.png"
+    save_fig_path = f"confusion_matrix_{model_name}.png"
     plt.savefig(save_fig_path, dpi=150)
     print(f"\n混同行列を {save_fig_path} に保存しました。")
 

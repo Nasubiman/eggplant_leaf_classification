@@ -97,8 +97,8 @@ def main():
     print(f"LoRA target modules: {target_modules}")
 
     lora_config = LoraConfig(
-        r=128,
-        lora_alpha=512,
+        r=64,
+        lora_alpha=256,
         target_modules=target_modules,
         bias="none",
     )
