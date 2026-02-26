@@ -45,7 +45,7 @@ def main():
         "--model_id", type=str, default="facebook/dinov3-vitl16-pretrain-lvd1689m",
         help="Vision モデルのHugging Face ID (SigLIP2, DINOv2, DINOv3 等)"
     )
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr_backbone", type=float, default=3e-5)
     parser.add_argument("--lr_head", type=float, default=1e-4)
@@ -97,8 +97,8 @@ def main():
     print(f"LoRA target modules: {target_modules}")
 
     lora_config = LoraConfig(
-        r=64,
-        lora_alpha=256,
+        r=128,
+        lora_alpha=512,
         target_modules=target_modules,
         bias="none",
     )

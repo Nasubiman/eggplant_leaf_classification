@@ -88,8 +88,8 @@ def main():
         target_modules = "all-linear"
 
     lora_config = LoraConfig(
-        r=64,
-        lora_alpha=256,
+        r=128,
+        lora_alpha=512,
         target_modules=target_modules,
         bias="none",
     )
@@ -183,7 +183,7 @@ def main():
             )
     fig.tight_layout()
     model_short = model_id.split('/')[-1]
-    save_fig_path = f"confusion_matrix_{model_short}.png"
+    save_fig_path = f"confusion_matrix.png"
     plt.savefig(save_fig_path, dpi=150)
     print(f"\n混同行列を {save_fig_path} に保存しました。")
 
