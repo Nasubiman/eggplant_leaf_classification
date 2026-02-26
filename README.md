@@ -25,15 +25,18 @@
   | 6 | Wilt Disease（萎凋病） |
 
 ## モデルと学習の方向性
-- **使用モデル:** `facebook/dinov3-vitl16-pretrain-lvd1689m` (DINOv3 ViT-Large, 0.3Bパラメータ)
+- **使用モデル:** torchvision の ImageNet 事前学習済みモデル 3 種のアンサンブル
+  - **ResNet-50** (25M パラメータ) — 残差接続ベースの標準的 CNN
+  - **DenseNet-201** (20M パラメータ) — 全層の特徴を密に結合する CNN
+  - **ConvNeXt-Base** (89M パラメータ) — Transformer の知見で再設計されたモダン CNN
 - **タスク設計:** 画像分類（1枚の画像に対して Softmax で 7 クラスに直接分類）
-- **手法:** LoRA (Low-Rank Adaptation, r=64) + 分類ヘッド（LayerNorm → Dropout → Linear）
+- **アンサンブル方式:** Hard Voting（多数決）— 各モデルの予測を集計し最多票のクラスを採用
 - **学習時の工夫:**
-  - データ拡張（RandomHorizontalFlip, ColorJitter）
+  - データ拡張（RandomHorizontalFlip, RandomVerticalFlip, RandomRotation, ColorJitter, RandomErasing）
   - Label Smoothing (0.1)
   - Cosine Annealing LR Scheduler
-  - Vision Encoder と分類ヘッドで学習率を分離
-- **GPU:** NVIDIA RTX 2080 Ti (11GB VRAM) × 2
+  - Weight Decay (0.05)
+- **GPU:** NVIDIA RTX 2080 Ti (11GB VRAM)
 
 ## 学習結果
 
@@ -41,46 +44,45 @@
 | 設定 | 値 |
 |---|---|
 | データ | 元画像 + データ拡張 (Train: 980枚) |
-| 学習率 | Vision Encoder: 3e-5, 分類ヘッド: 1e-4 |
-| バッチサイズ | 8 |
-| Epoch数 | 20 |
-| LoRA | r=64, alpha=256 |
-| 学習時間 | 約5分 |
+| 学習率 | 1e-4 (AdamW) |
+| バッチサイズ | 32 |
+| Epoch数 | 30 |
+| Dropout | 0.4 |
+| Weight Decay | 0.05 |
+| 保存基準 | Val Loss が最小のモデル |
 
-### Val Acc 推移（抜粋）
-| Epoch | Train Acc | Val Acc | Val Loss |
+### 各モデルの Val 結果
+| モデル | Best Epoch | Val Acc | Val Loss |
 |---|---|---|---|
-| 1 | 0.3878 | 0.7000 | 1.1737 |
-| 5 | 0.9653 | 0.9476 | 0.5986 |
-| 9 | 0.9949 | 0.9619 | 0.5588 |
-| 15 | 1.0000 | **0.9667** | **0.5447** ← 最良 |
-| 20 | 1.0000 | 0.9667 | 0.5458 |
+| ResNet-50 | 16 | 0.9476 | 0.5451 |
+| DenseNet-201 | 29 | 0.9524 | 0.5411 |
+| ConvNeXt-Base | 19 | 0.9524 | 0.5592 |
 
-### テスト結果 (テストデータ 210枚)
-- **Accuracy: 98.10% (206/210)**
-- **推論速度: 11.5 ms/画像 (210枚を2.42秒)**
+### テスト結果 (テストデータ 210枚, アンサンブル Hard Voting)
+- **Accuracy: 97.62% (205/210)**
+- **推論速度: 47.3 ms/画像 (210枚を9.93秒)**
 
 ### Classification Report
 | クラス | Precision | Recall | F1-Score | Support |
 |---|---|---|---|---|
 | Healthy Leaf | 0.97 | 0.97 | 0.97 | 36 |
 | Insect Pest Disease | 1.00 | 1.00 | 1.00 | 27 |
-| Leaf Spot Disease | 0.97 | 0.93 | 0.95 | 30 |
-| Mosaic Virus Disease | 0.93 | 1.00 | 0.97 | 28 |
-| Small Leaf Disease | 1.00 | 1.00 | 1.00 | 30 |
-| White Mold Disease | 1.00 | 0.96 | 0.98 | 27 |
-| Wilt Disease | 1.00 | 1.00 | 1.00 | 32 |
+| Leaf Spot Disease | 1.00 | 0.97 | 0.98 | 30 |
+| Mosaic Virus Disease | 0.97 | 1.00 | 0.98 | 28 |
+| Small Leaf Disease | 0.97 | 0.97 | 0.97 | 30 |
+| White Mold Disease | 0.96 | 0.93 | 0.94 | 27 |
+| Wilt Disease | 0.97 | 1.00 | 0.98 | 32 |
 | **macro avg** | **0.98** | **0.98** | **0.98** | **210** |
 
 ### 混同行列
-`confusion_matrix_dinov3-vitl16-pretrain-lvd1689m.png` を参照してください。
+`confusion_matrix_ensemble_hard.png` を参照してください。
 
 ## ファイル構成
 | ファイル | 説明 |
 |---|---|
 | `preprocess.py` | データセットをHugging Face datasets形式に変換し、Train/Val/Testに分割する |
-| `train.py` | DINOv3をLoRAでファインチューニングする学習スクリプト |
-| `test.py` | テストデータで推論を実行し、Accuracy・混同行列・Classification Reportを出力するスクリプト |
+| `train.py` | torchvision モデルの学習スクリプト（ResNet-50, DenseNet-201, ConvNeXt-Base） |
+| `test.py` | アンサンブル推論スクリプト（Soft/Hard Voting） |
 | `class_mapping.json` | クラス名とIDの対応表 |
 | `config.json` | データセットパス等の環境設定 (.gitignore対象) |
-| `NOTICE` | DINOv3 ライセンス情報 |
+| `NOTICE` | ライセンス情報 |

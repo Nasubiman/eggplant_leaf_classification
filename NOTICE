@@ -1,37 +1,34 @@
 NOTICE - Model License Information
 
-This project uses derivative models based on Meta's DINOv3,
-a self-supervised Vision Transformer model.
+This project uses pre-trained models from torchvision (PyTorch).
+All models are fine-tuned on a custom eggplant disease recognition dataset.
 
 ==========================================================================
 
-1. Base Model
-   - Model: facebook/dinov3-vitl16-pretrain-lvd1689m (DINOv3 ViT-Large)
-   - Provider: Meta AI
-   - License: DINOv3 License (https://ai.meta.com/resources/models-and-libraries/dinov3-license/)
-   - Paper: https://arxiv.org/abs/2508.10104
-   - Repository: https://github.com/facebookresearch/dinov3
+1. Pre-trained Models Used
+   - ResNet-50 (Microsoft Research, "Deep Residual Learning")
+   - DenseNet-201 (Facebook AI Research, "Densely Connected Convolutional Networks")
+   - ConvNeXt-Base (Facebook AI Research, "A ConvNet for the 2020s")
+   - All weights sourced from torchvision (BSD 3-Clause License)
 
-2. Modifications
-   This project includes the following modifications to the original model:
-   - LoRA (Low-Rank Adaptation, r=64, alpha=256) fine-tuning on a custom
-     eggplant disease recognition dataset
-     (Kaggle: sujaykapadnis/eggplant-disease-recognition-dataset)
-   - Classification head (LayerNorm + Dropout + Linear) added on top of
-     the vision encoder for 7-class disease classification
-   - Training with data augmentation (RandomHorizontalFlip, ColorJitter),
+2. Dataset
+   - Kaggle: sujaykapadnis/eggplant-disease-recognition-dataset
+   - 1,400 images, 7 classes of eggplant leaf diseases
+
+3. Modifications
+   This project includes the following modifications to the original models:
+   - Classification head replaced with Dropout (0.4) + Linear layer
+     for 7-class disease classification
+   - Full fine-tuning with data augmentation (RandomHorizontalFlip,
+     RandomVerticalFlip, RandomRotation, ColorJitter, RandomErasing),
      Label Smoothing (0.1), and Cosine Annealing LR Scheduler
+   - Ensemble inference using Hard Voting across 3 models
 
-3. Permitted Uses
-   - Research and academic use is permitted
-   - Please refer to the DINOv3 License for full terms regarding
-     commercial use, redistribution, and other usage conditions
+4. License
+   - torchvision is distributed under the BSD 3-Clause License
+   - https://github.com/pytorch/vision/blob/main/LICENSE
 
-4. Redistribution Requirements
-   If you redistribute this derivative model, you must:
-   - Include a copy of or reference to the DINOv3 License
-   - Clearly state that the model has been modified from the original
+5. Redistribution
+   If you redistribute this project, you must:
    - Include this NOTICE file
-
-For the full license terms, please visit:
-https://ai.meta.com/resources/models-and-libraries/dinov3-license/
+   - Comply with the BSD 3-Clause License terms
