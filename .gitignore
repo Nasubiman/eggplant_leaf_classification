@@ -1,3 +1,7 @@
 memo.txt
 config.json
 eggplant_dataset/
+dinov3-vitl16-pretrain-lvd1689m-eggplant/
+paligemma-eggplant-lora/
+paligemma-eggplant-lora-final/
+*.pt
